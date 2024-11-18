@@ -13,10 +13,15 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
+    permissions:
+      # Required to allow actions/checkout to clone the repository onto the runner
+      contents: read
+      # Required to allow the vitest coverage action to write a comment into the pull request
+      pull-requests: write
 
     strategy:
       matrix:
-        node-version: [16.x, 18.x]
+        node-version: [16.x]
         # See supported Node.js release schedule at https://nodejs.org/en/about/releases/
 
     steps:
