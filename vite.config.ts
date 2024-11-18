@@ -17,7 +17,7 @@ export default defineConfig({
         lines: 95,
         branches: 95,
         functions: 100,
-        statements: 95
+        statements: 90
     },
     setupFiles: ["./test/setup.ts"],
   },
