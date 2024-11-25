@@ -1,0 +1,96 @@
+name: Continuous Deployment
+
+on:
+  workflow_run:
+    workflows: ["Packaging"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+
+      - name: Terraform Init
+        working-directory: ./terraform
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        id: plan
+        run: |
+          terraform plan -out=tfplan
+        continue-on-error: true
+
+      - name: Get Image Tag
+        id: get-tag
+        run: |
+          echo "IMAGE_TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}/artifacts | jq -r '.artifacts[0].name')" >> $GITHUB_ENV
+
+      - name: Prepare K8s manifests
+        run: |
+          # Update image in deployment.yaml
+          sed -i "s|image:.*|image: ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}|" k8s-manifests/deployment.yaml
+
+      - name: Deploy to EC2 using SSM
+        if: steps.plan.outcome == 'success'
+        run: |
+          # Get instance ID from Terraform output
+          INSTANCE_ID=$(terraform -chdir=./terraform output -raw frontend_instance_id)
+
+          # Copy manifests using SSM
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'sudo su -',
+              'cat > /k8s-manifests/deployment.yaml << \"EOL\"
+              $(cat k8s-manifests/deployment.yaml)
+              EOL',
+              'cat > /k8s-manifests/service.yaml << \"EOL\"
+              $(cat k8s-manifests/service.yaml)
+              EOL',
+              'kubectl apply -f /k8s-manifests/deployment.yaml',
+              'kubectl apply -f /k8s-manifests/service.yaml',
+              'kubectl rollout status deployment/frontend-deployment'
+            ]"
+
+      - name: Terraform Apply
+        if: steps.plan.outcome == 'success'
+        working-directory: ./terraform
+        run: |
+          terraform apply -auto-approve tfplan
+
+      - name: Comment on PR
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const output = `#### Terraform Deployment Complete 🚀
+            * Instance ID: ${process.env.INSTANCE_ID}
+            * Deployment Status: Success
+            * New Image: ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.name,
+              body: output
+            })
