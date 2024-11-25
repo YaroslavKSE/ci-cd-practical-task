@@ -26,3 +26,4 @@ coverage
 
 .terraform/
 *.tfvars
+**/.terraform/*
