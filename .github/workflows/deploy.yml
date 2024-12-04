@@ -1,0 +1,107 @@
+name: Deploy to K8s
+on:
+  workflow_dispatch:
+    inputs:
+      imageTag:
+        description: 'Docker image tag to deploy'
+        required: true
+      environment:
+        description: 'Environment to deploy to'
+        type: choice
+        options:
+          - production
+        required: true
+        default: 'production'
+  workflow_run:
+    workflows: ["Packaging"]
+    types:
+      - completed
+    branches: [main]
+
+jobs:
+  deploy:
+    name: 🚀 Deploy to K8s
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+      url: http://${{ steps.get-ip.outputs.public-ip }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read  # Added to read workflow artifacts
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Fetch Instance ID from S3
+        id: get-instance
+        run: |
+          aws s3 cp s3://rocketdex-terraform-state-production/terraform.tfstate .
+          INSTANCE_ID=$(jq -r '.outputs.frontend_instance_id.value' terraform.tfstate)
+          PUBLIC_IP=$(jq -r '.outputs.frontend_public_ip.value' terraform.tfstate)
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "public-ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
+
+      - name: Get Image Tag
+        id: get-image
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "image_tag=${{ github.event.inputs.imageTag }}" >> $GITHUB_OUTPUT
+          else
+            # Get the SHA from the triggering workflow
+            SHA="${{ github.event.workflow_run.head_sha }}"
+            # Use the short SHA as the tag
+            echo "image_tag=${SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for Manual Approval
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ github.TOKEN }}
+          approvers: ${{ github.actor }}
+          minimum-approvals: 1
+          instructions: 'Please review the deployment of image tag: ${{ steps.get-image.outputs.image_tag }}'
+
+      - name: Update Kubernetes Deployment
+        run: |
+          # Create temporary deployment file
+          mkdir -p k8s-tmp
+          cp deployment.yaml k8s-tmp/
+
+          # Update image tag
+          NEW_IMAGE="ghcr.io/${{ github.repository }}:${{ steps.get-image.outputs.image_tag }}"
+          sed -i "s|image: .*|image: $NEW_IMAGE|" k8s-tmp/deployment.yaml
+
+          # Copy file to instance and apply
+          aws ssm send-command \
+            --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'mkdir -p /k8s-manifests',
+              'chown -R ec2-user:ec2-user /k8s-manifests'
+            ]"
+
+          aws ssm send-command \
+            --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'sudo -u ec2-user kubectl apply -f /k8s-manifests/',
+              'sudo systemctl reload nginx'
+            ]"
+
+      - name: Verify Deployment
+        run: |
+          aws ssm send-command \
+            --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[
+              'sudo -u ec2-user kubectl rollout status deployment/frontend-deployment'
+            ]"
