@@ -32,6 +32,9 @@ minikube start --driver=docker --cpus=2 --memory=2048
 # Create directory for K8s manifests
 mkdir -p /k8s-manifests
 
+aws s3 cp s3://k8s-deployment-manifests/rocketdex/deployment.yaml /k8s-manifests/
+aws s3 cp s3://k8s-deployment-manifests/rocketdex/service.yaml /k8s-manifests/
+
 # Apply K8s manifests
 kubectl apply -f /k8s-manifests/
 
