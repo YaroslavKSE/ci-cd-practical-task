@@ -27,10 +27,13 @@ curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-
 sudo install minikube-linux-amd64 /usr/local/bin/minikube
 
 # Start Minikube
-sudo -u ec2-user minikube start --driver=docker --cpus=2 --memory=2048
+minikube start --driver=docker --cpus=2 --memory=2048
 
 # Create directory for K8s manifests
 mkdir -p /k8s-manifests
+
+# Apply K8s manifests
+kubectl apply -f /k8s-manifests/
 
 # Install Nginx
 sudo dnf install -y nginx
