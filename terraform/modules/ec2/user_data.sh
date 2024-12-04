@@ -26,23 +26,45 @@ sudo dnf install -y conntrack
 curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube-linux-amd64
 sudo install minikube-linux-amd64 /usr/local/bin/minikube
 
-# Start Minikube
-minikube start --driver=docker --cpus=2 --memory=2048
+# Create .kube directory for ec2-user
+sudo -u ec2-user mkdir -p /home/ec2-user/.kube
+sudo chown -R ec2-user:ec2-user /home/ec2-user/.kube
 
-# Create directory for K8s manifests
+# Create directory for K8s manifests and set permissions
 mkdir -p /k8s-manifests
+chown -R ec2-user:ec2-user /k8s-manifests
 
+# Download K8s manifests from S3
 aws s3 cp s3://k8s-deployment-manifests/rocketdex/deployment.yaml /k8s-manifests/
 aws s3 cp s3://k8s-deployment-manifests/rocketdex/service.yaml /k8s-manifests/
+
+# Stop and delete any existing minikube cluster
+sudo -u ec2-user minikube stop || true
+sudo -u ec2-user minikube delete || true
+
+# Start Minikube with specific configuration
+sudo -u ec2-user CHANGE_MINIKUBE_NONE_USER=true minikube start \
+  --driver=docker \
+  --cpus=2 \
+  --memory=2048 \
+  --kubernetes-version=stable
+
+# Wait for minikube to be ready
+sleep 10
+
+# Configure kubectl
+sudo -u ec2-user minikube update-context
+sudo cp -i $(sudo -u ec2-user minikube kubectl -- config view --raw -o json | jq -r '.clusters[0].cluster."certificate-authority"') /home/ec2-user/.minikube/ca.crt
+sudo chown ec2-user:ec2-user /home/ec2-user/.minikube/ca.crt
+
+# Apply K8s manifests with validation disabled for initial deployment
+sudo -u ec2-user kubectl apply -f /k8s-manifests/ --validate=false
 
 # Apply K8s manifests
 kubectl apply -f /k8s-manifests/
 
 # Install Nginx
 sudo dnf install -y nginx
-
-# Wait briefly for minikube to be fully ready
-sleep 15
 
 # Get minikube IP and create Nginx configuration
 MINIKUBE_IP=$(sudo -u ec2-user minikube ip)
