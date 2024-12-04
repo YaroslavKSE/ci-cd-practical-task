@@ -60,9 +60,6 @@ sudo chown ec2-user:ec2-user /home/ec2-user/.minikube/ca.crt
 # Apply K8s manifests with validation disabled for initial deployment
 sudo -u ec2-user kubectl apply -f /k8s-manifests/
 
-# Apply K8s manifests
-kubectl apply -f /k8s-manifests/
-
 # Install Nginx
 sudo dnf install -y nginx
 
