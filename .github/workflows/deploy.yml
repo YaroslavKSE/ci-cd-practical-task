@@ -72,7 +72,7 @@ jobs:
       - name: Update Kubernetes Deployment
         run: |
           # Update image tag in the downloaded deployment file
-          NEW_IMAGE="ghcr.io/${{ github.repository }}:${{ steps.get-image.outputs.image_tag }}"
+          NEW_IMAGE="ghcr.io/yaroslavkse/ci-cd-practical-task:${{ steps.get-image.outputs.image_tag }}"
           sed -i "s|image: .*|image: $NEW_IMAGE|" k8s-tmp/deployment.yaml
           
           echo "Deploying image: $NEW_IMAGE"
