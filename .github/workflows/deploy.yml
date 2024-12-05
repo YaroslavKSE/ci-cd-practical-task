@@ -18,6 +18,12 @@ on:
       - completed
 #    branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+  packages: read
+
 jobs:
   deploy:
     name: 🚀 Deploy to K8s
@@ -26,14 +32,10 @@ jobs:
     environment:
       name: ${{ github.event.inputs.environment || 'production' }}
       url: http://${{ steps.get-ip.outputs.public-ip }}
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
 
     steps:
       - uses: actions/checkout@v3
-
+      
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v1
         with:
@@ -70,9 +72,9 @@ jobs:
           # Update image tag
           NEW_IMAGE="ghcr.io/${{ github.repository }}:${{ steps.get-image.outputs.image_tag }}"
           sed -i "s|image: .*|image: $NEW_IMAGE|" k8s-tmp/deployment.yaml
-
+          
           echo "Deploying image: $NEW_IMAGE"
-
+          
           # Copy file to instance and apply
           aws ssm send-command \
             --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
@@ -81,7 +83,7 @@ jobs:
               'mkdir -p /k8s-manifests',
               'chown -R ec2-user:ec2-user /k8s-manifests'
             ]"
-
+          
           aws ssm send-command \
             --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
