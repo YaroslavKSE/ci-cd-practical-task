@@ -16,7 +16,7 @@ on:
     workflows: ["Packaging"]
     types:
       - completed
-    branches: [main]
+#    branches: [main]
 
 jobs:
   deploy:
