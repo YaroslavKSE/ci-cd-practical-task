@@ -29,7 +29,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-      actions: read  # Added to read workflow artifacts
+      actions: read
 
     steps:
       - uses: actions/checkout@v3
@@ -62,23 +62,16 @@ jobs:
             echo "image_tag=${SHA::7}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Wait for Manual Approval
-        uses: trstringer/manual-approval@v1
-        with:
-          secret: ${{ github.TOKEN }}
-          approvers: ${{ github.actor }}
-          minimum-approvals: 1
-          instructions: 'Please review the deployment of image tag: ${{ steps.get-image.outputs.image_tag }}'
-
       - name: Update Kubernetes Deployment
         run: |
           # Create temporary deployment file
           mkdir -p k8s-tmp
           cp deployment.yaml k8s-tmp/
-
           # Update image tag
           NEW_IMAGE="ghcr.io/${{ github.repository }}:${{ steps.get-image.outputs.image_tag }}"
           sed -i "s|image: .*|image: $NEW_IMAGE|" k8s-tmp/deployment.yaml
+
+          echo "Deploying image: $NEW_IMAGE"
 
           # Copy file to instance and apply
           aws ssm send-command \
