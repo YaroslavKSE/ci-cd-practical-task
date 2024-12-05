@@ -16,7 +16,6 @@ on:
     workflows: ["Packaging"]
     types:
       - completed
-#    branches: [main]
 
 permissions:
   contents: read
@@ -52,6 +51,12 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "public-ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
 
+      - name: Download K8s Manifests
+        run: |
+          mkdir -p k8s-tmp
+          aws s3 cp s3://k8s-deployment-manifests/rocketdex/deployment.yaml k8s-tmp/
+          aws s3 cp s3://k8s-deployment-manifests/rocketdex/service.yaml k8s-tmp/
+
       - name: Get Image Tag
         id: get-image
         run: |
@@ -66,16 +71,13 @@ jobs:
 
       - name: Update Kubernetes Deployment
         run: |
-          # Create temporary deployment file
-          mkdir -p k8s-tmp
-          cp deployment.yaml k8s-tmp/
-          # Update image tag
+          # Update image tag in the downloaded deployment file
           NEW_IMAGE="ghcr.io/${{ github.repository }}:${{ steps.get-image.outputs.image_tag }}"
           sed -i "s|image: .*|image: $NEW_IMAGE|" k8s-tmp/deployment.yaml
           
           echo "Deploying image: $NEW_IMAGE"
           
-          # Copy file to instance and apply
+          # Copy updated manifests to instance
           aws ssm send-command \
             --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
@@ -84,10 +86,16 @@ jobs:
               'chown -R ec2-user:ec2-user /k8s-manifests'
             ]"
           
+          # Copy the files to the instance using AWS Systems Manager
+          aws s3 cp k8s-tmp/deployment.yaml s3://k8s-deployment-manifests/rocketdex/deployment.yaml
+          aws s3 cp k8s-tmp/service.yaml s3://k8s-deployment-manifests/rocketdex/service.yaml
+          
           aws ssm send-command \
             --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
             --parameters "commands=[
+              'aws s3 cp s3://k8s-deployment-manifests/rocketdex/deployment.yaml /k8s-manifests/',
+              'aws s3 cp s3://k8s-deployment-manifests/rocketdex/service.yaml /k8s-manifests/',
               'sudo -u ec2-user kubectl apply -f /k8s-manifests/',
               'sudo systemctl reload nginx'
             ]"
